@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<meta charset="utf-8">
+<!--
+Inspired by: https://findtheinvisiblecow.com/
+Based on the "Cocogoat" joke explained here: https://tvtropes.org/pmwiki/pmwiki.php/Memes/GenshinImpact
+I wanted "Cocogoat" to reflect the energy here: https://www.youtube.com/watch?v=8VABEN3mUcM, but I think I failed.
+
+Unlike invisible cow which plays different sound files based on cursor distance from the cow,
+this game plays a single file with varying volume and L-R pan depending on position relative to the cocogoat.
+
+The image of Ganyu is covered by a blank div "cover" because:
+- click events on hidden elements don't work
+- opacity 0 images can be interacted with in unexpected ways.
+
+In other words, an additional element z-indexed on top of the image was required. 
+Or I could have simply made the image not even exist and only added the content when the mouse was clicked at certain coordinates,
+but this way is easier to debug. I'm not terribly concerned about people using debug tools to cheat, given there's an instant win button.
+-->
+<head>
+
+<title>Hunt Cocogoat</title>
+<link rel="shortcut icon" type="image/png" href="coconut.png"/>
+</head>
+
+<div id="space" class="hider">	
+	<img src="ganyu-small.png" id="cocogoat" class="hider"/>
+	<div id="cover" onclick="find()" class="hider"></div>	
+	<div id="promptButton" onclick="startPlaying()">
+	Cocogoat. Go find it.
+	<br><br>
+	Use headphones and follow the audio cues.
+	</div>
+</div>
+
+<a href="https://cocogo.at"><div id="back" class="navigation">Return to Cocogo.at</div></a>
+<div id="lost" class="navigation" onclick="giveUp()">Give up?</div>
+<div id="controls" class="navigation">
+	<div id="easy" class="navigation" onclick="toggleCursor()">Disable Easy Mode</div>
+	<div id="mute" class="navigation" onclick="toggleMute()">Mute</div>
+</div>
+<div id="info" class="navigation">
+	<div id="counter" class="navigation">Cocogoats found: 0</div>
+	<div id="instructions" class="navigation" onclick="viewInstructions()">Instructions</div>
+</div>
+
+<audio src="qiqi.mp3"></audio>
+
+<style>
+body {
+	font-family: Georgia, serif;
+	color: MediumSlateBlue;
+}
+.navigation {
+	font-size: 14px;
+	border: 3px solid MediumSlateBlue;
+	padding: 10px;
+	text-align: center;
+	cursor: pointer;
+	z-index: 200;
+}
+.navigation:hover {
+	border: 3px solid MediumBlue;
+}
+#easy {
+	float: right;
+	color: Crimson;
+}
+#mute {
+	float: left;
+	margin: 0px 10px;
+}
+#instructions {
+	float: left;
+	margin: 0px 10px;
+	visibility: hidden;
+}
+#counter {
+	float: right;
+	cursor: default;
+	visibility: hidden;
+	border: 3px solid MediumSlateBlue;
+}
+#lost {
+	bottom: 10px;
+	right: 10px;
+	visibility: hidden;
+	position: absolute;
+}
+#back {
+	bottom: 10px;
+	left: 10px;
+	position: absolute;
+}
+#controls {
+	top: 0px;
+	right: 0px;
+	border: none;
+	position: absolute;
+	cursor: default;
+}
+#info {
+	top: 0px;
+	left: 0px;
+	border: none;
+	position: absolute;
+	cursor: default;
+}
+#promptButton {
+	margin: auto;
+	margin-top: 10%;
+	width: 40%;
+	border: 3px solid MediumSlateBlue;
+	padding: 50px;
+	font-size: 2em;
+	text-align: center;
+	cursor: pointer;
+}
+.hider {
+	position: absolute;
+	cursor: default;
+}
+#space {
+	height: 100%;
+	width: 100%;
+}
+body {
+	overflow: hidden;
+	margin: 0px;
+	padding: 0px;
+}
+#cocogoat {
+	height: 100px;
+	z-index: 1;
+	visibility: hidden;
+}
+#cover {
+	height: 100px;
+	width: 100px;
+	z-index: 100;
+	opacity: 0;
+	cursor: pointer;
+}
+</style>
+
+<script>
+// Generally the program flow will go as follows:
+// user clicks start button, which runs startplaying, which runs hide, which starts playhint (which is looped using events).
+// user finds and clicks cocogoat, which runs reveal, which waits then runs hide.
+
+// global constants, mostly audio stuff. 
+// I could use const instead of var, but then try/catch below has restricted scope so I feel like this is functionally more readable
+	var AudioContext;
+	var audioCtx;
+	var audioElement;
+	var track;
+	var gainNode;
+	var pannerOptions;
+	var panner;
+	
+// check WebAudio support
+try {
+	AudioContext = window.AudioContext || window.webkitAudioContext;
+	audioCtx = new AudioContext();
+	audioElement = document.querySelector('audio');
+	track = audioCtx.createMediaElementSource(audioElement);
+	gainNode = audioCtx.createGain();
+	pannerOptions = {pan: 0};
+	panner = new StereoPannerNode(audioCtx, pannerOptions);
+} catch (e) {
+	alert('Sorry, your browser does not support the Web Audio API');
+}
+
+
+// Mouse coordinates since I always want access to these outside of the context of events.
+var mouseX = 0;
+var mouseY = 0;
+// global states
+var cocogoatFound = false;
+var audioMuted = false;
+var easyMode = true;
+var gameStarted = false; // allows finding of cocogoat and governs instruction behavior
+
+//helper functions for finding distances (used when adjusting audio)
+//calculates distance between a given point (in this case the cursor) and the center of an element
+//use Math.ceil so value will never be 0 to avoid divide by zero errors
+function calculateDistance(elem, mouseX, mouseY) {
+        return Math.ceil(Math.sqrt(Math.pow(mouseX - (elem.offsetLeft+(elem.width/2)), 2) + Math.pow(mouseY - (elem.offsetTop+(elem.height/2)), 2)));
+    }
+	
+function calculateXDistance(elem, mouseX, mouseY) {
+	return Math.ceil(mouseX - (elem.offsetLeft+(elem.width/2)));
+}
+	
+// hides cocogoat and moves to random location. Runs once when user begins, and after each time cocogoat is found.
+function hide() {
+	//hide cocogoat
+	document.getElementById("cocogoat").style.visibility = "hidden";
+	document.getElementById("cocogoat").style.opacity = 0;
+	//resize cocogoat
+	var cocogoatSize = 1.8*0.071*Math.sqrt((document.getElementById('space').clientHeight)*(document.getElementById('space').clientWidth));
+	document.getElementById("cocogoat").style.height = (cocogoatSize+"px");
+	//resize empty div covering cocogoat
+	document.getElementById("cover").style.height = (cocogoatSize+"px");
+	document.getElementById("cover").style.width = (cocogoatSize+"px");
+	//move cocogoat to random location
+	var x = Math.floor(Math.random()*(document.getElementById('space').clientWidth-cocogoatSize));
+	var y = Math.floor(Math.random()*(document.getElementById('space').clientHeight-cocogoatSize));
+	document.getElementById("cocogoat").style.marginLeft = (x + "px");
+	document.getElementById("cocogoat").style.marginTop = (y + "px");
+	document.getElementById("cover").style.marginLeft = (x + "px");
+	document.getElementById("cover").style.marginTop = (y + "px");
+	//keep track of whether user has found cocogoat
+	cocogoatFound = false;
+	//start playing hint audio
+	playHint();
+}
+
+//reveals cocogoat, increments cocogoat counter. Activated when cover is clicked.
+function find() {
+	//prevent from running multiple times if the user clicks more than once
+	if (!cocogoatFound && gameStarted) {
+		//prevent hint audio from playing
+		cocogoatFound = true;
+		//increment cocogoat counter if localstorage exists.
+		if ((typeof(Storage) !== "undefined")) {
+			if (!isNaN(localStorage.getItem("cocogoatCount")) && (localStorage.getItem("cocogoatCount"))) {
+				//if number is stored, increment count.
+				localStorage.setItem("cocogoatCount", Number(localStorage.getItem("cocogoatCount")) + 1);
+			}
+		}
+		//make cocogoat visible for a moment
+		document.getElementById("cocogoat").style.visibility = "visible";
+		document.getElementById("cocogoat").style.opacity = 1;
+		//re-hide cocogoat after a delay
+		setTimeout(hide, 2000);
+		//increment and update cocogoat counter
+		updateNumberOfCocogoatsFound();
+	}
+}
+
+//always running in the background, playing audio hints. Doesn't play if cocogoat is found.
+function playHint() {
+	//set volume to a value inversely proportional to the distance between the cursor and cocogoat, up to a maximum volume.
+	if (!audioMuted) {
+		gainNode.gain.value = Math.min(1,70/calculateDistance(document.getElementById("cocogoat"), mouseX, mouseY));
+	}
+	//set stereo pan based on whether cocogoat is left or right of the cursor position, scaled by width of window
+	//use square root to make pan effect more significant near the target. Requires workaround to return proper negative values.
+	let xDistance = calculateXDistance(document.getElementById("cocogoat"), mouseX, mouseY);
+	panner.pan.value = -1 * Math.sign(xDistance) * Math.sqrt(Math.abs(xDistance)/(document.getElementById('space').clientWidth));
+	//if user has not found cocogoat, play the sound. An event listener elsewhere will loop this function.
+	if (!cocogoatFound) {
+		audioElement.play();
+	}
+}
+
+//saves mouse position to a global variable because mouse coords are only accessible through events and
+//I don't know a better way to handle this.
+function handleMouseMove(event) {
+	mouseX = event.pageX;
+	mouseY = event.pageY;
+}
+
+//function that starts the game and hides the start button, used when start button is clicked.
+function startPlaying() {
+	document.getElementById("promptButton").style.visibility = "hidden";
+	document.getElementById("lost").style.visibility = "visible";
+	document.getElementById("instructions").style.visibility = "visible";
+	document.getElementById("counter").style.visibility = "visible";
+	//have to resume audio context for chrome compatibility
+	audioCtx.resume();
+	console.log("AudioContext started with user interaction.");
+	gameStarted = true;
+	hide();
+}
+
+//when the user clicks give up, make cocogoat somewhat visible but do not actually "find" until they click cocogoat.
+function giveUp() {
+	document.getElementById("cocogoat").style.visibility = "visible";
+	document.getElementById("cocogoat").style.opacity = 0.15;
+}
+
+//lets the user mute audio. Visually updates mute button.
+function toggleMute() {
+	audioMuted = !audioMuted;
+	if (audioMuted) {
+		gainNode.gain.value = 0;
+		document.getElementById("mute").textContent = "Unmute";
+		document.getElementById("mute").style.color = "Crimson";
+	}
+	else {
+		document.getElementById("mute").textContent = "Mute";
+		document.getElementById("mute").style.color = "MediumSlateBlue";
+	}
+}
+
+//toggles easy mode: in easy mode the cursor style changes when hovering over invisible cocogoat
+function toggleCursor() {
+	easyMode = !easyMode;
+	if (easyMode) {
+		document.getElementById("cover").style.cursor = "pointer";
+		document.getElementById("easy").textContent = "Disable Easy Mode";
+		document.getElementById("easy").style.color = "Crimson";
+	}
+	else {
+		document.getElementById("cover").style.cursor = "default";
+		document.getElementById("easy").textContent = "Enable Easy Mode";
+		document.getElementById("easy").style.color = "MediumSlateBlue";
+	}
+}
+
+//when instruction button clicked, open promptButton with full instructions.
+//promptButton already closes onclick, but also close it if the user clicks the instruction button again.
+function viewInstructions() {
+	//if the prompt is visible, close the prompt
+	if (document.getElementById("promptButton").style.visibility == "visible") {
+		document.getElementById("promptButton").style.visibility = "hidden";
+	} else {
+		let instructions = "There is an invisible cocogoat hidden on this page. The goal is to click on the invisible cocogoat.<br><br>The audio cues become louder as the cursor gets closer to cocogoat. The sound will come from the direction where the cocogoat is, relative to the cursor.<br><br>When cocogoat is found, it will be moved to a random position and hidden again after a short delay.<br><br>Enabling Easy Mode makes the cursor change when hovering over the cocogoat.<br><br>Click \"Give Up\" to instantly see cocogoat's location.";
+		document.getElementById("promptButton").innerHTML = instructions;
+		document.getElementById("promptButton").style.visibility = "visible";
+		document.getElementById("promptButton").style.fontSize = "1.2em";
+	}
+}
+
+//updates cocogoat counter to match stored value. Runs when page starts and when cocogoat is found.
+function updateNumberOfCocogoatsFound() {
+	if (typeof(Storage) !== "undefined") {
+		//check if localstorage exists, and check if there is a number stored
+		if (!isNaN(localStorage.getItem("cocogoatCount")) && (localStorage.getItem("cocogoatCount"))) {
+			//if number is stored, set counter to match.
+			document.getElementById("counter").textContent = ("Cocogoats found: " + Number(localStorage.getItem("cocogoatCount")));
+		} else {
+			//if no number is stored, set counter to 0
+			localStorage.setItem("cocogoatCount", 0);
+			document.getElementById("counter").textContent = ("Cocogoats found: 0");
+		}
+	} else {
+		//the user doesn't need to know about the useless number they're missing out on. Hide the cocogoat counter.
+		document.getElementById("counter").style.visibility = "hidden";
+	}
+}
+
+//check if user has previously found cocogoats, update banner (runs at page start).
+updateNumberOfCocogoatsFound();
+//set up audio path
+track.connect(panner).connect(gainNode).connect(audioCtx.destination);
+//whenever hint audio finishes, play more hint audio (effectively loop the hint).
+audioElement.addEventListener('ended', playHint);
+//always be tracking where the mouse is because apparently there's no way to do this without events
+document.getElementById("space").addEventListener("mousemove", handleMouseMove);
+
+</script>
+
+</html>
