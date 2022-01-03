@@ -3,7 +3,6 @@ Like Find the Invisible Cow, but Cocogoat.
 
 Inspired by: https://findtheinvisiblecow.com/  
 Based on the "Cocogoat" joke explained here: https://tvtropes.org/pmwiki/pmwiki.php/Memes/GenshinImpact  
-I wanted "Cocogoat" to reflect the energy here: https://www.youtube.com/watch?v=8VABEN3mUcM, but I think I failed.  
 
 Unlike invisible cow which plays different sound files based on cursor distance from the cow,
 this game plays a single file with varying volume and L-R pan depending on position relative to the cocogoat.
