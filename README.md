@@ -1,6 +1,8 @@
 # InvisibleCocogoat
 Like Find the Invisible Cow, but Cocogoat.
 
+Test it out at [cocogo.at](https://cocogo.at)
+
 Inspired by: https://findtheinvisiblecow.com/  
 Based on the "Cocogoat" joke explained here: https://tvtropes.org/pmwiki/pmwiki.php/Memes/GenshinImpact  
 
