@@ -3,8 +3,6 @@
 <meta charset="utf-8">
 <!--
 Inspired by: https://findtheinvisiblecow.com/
-Based on the "Cocogoat" joke explained here: https://tvtropes.org/pmwiki/pmwiki.php/Memes/GenshinImpact
-I wanted "Cocogoat" to reflect the energy here: https://www.youtube.com/watch?v=8VABEN3mUcM, but I think I failed.
 
 Unlike invisible cow which plays different sound files based on cursor distance from the cow,
 this game plays a single file with varying volume and L-R pan depending on position relative to the cocogoat.
@@ -187,8 +185,8 @@ var gameStarted = false; // allows finding of cocogoat and governs instruction b
 //calculates distance between a given point (in this case the cursor) and the center of an element
 //use Math.ceil so value will never be 0 to avoid divide by zero errors
 function calculateDistance(elem, mouseX, mouseY) {
-        return Math.ceil(Math.sqrt(Math.pow(mouseX - (elem.offsetLeft+(elem.width/2)), 2) + Math.pow(mouseY - (elem.offsetTop+(elem.height/2)), 2)));
-    }
+    return Math.ceil(Math.sqrt(Math.pow(mouseX - (elem.offsetLeft+(elem.width/2)), 2) + Math.pow(mouseY - (elem.offsetTop+(elem.height/2)), 2)));
+}
 	
 function calculateXDistance(elem, mouseX, mouseY) {
 	return Math.ceil(mouseX - (elem.offsetLeft+(elem.width/2)));
@@ -243,9 +241,9 @@ function find() {
 
 //always running in the background, playing audio hints. Doesn't play if cocogoat is found.
 function playHint() {
-	//set volume to a value inversely proportional to the distance between the cursor and cocogoat, up to a maximum volume.
+	//set volume to a value roughly inversely proportional to the distance between the cursor and cocogoat, but never below -20dB.
 	if (!audioMuted) {
-		gainNode.gain.value = Math.min(1,70/calculateDistance(document.getElementById("cocogoat"), mouseX, mouseY));
+		gainNode.gain.value = Math.min(Math.max((1 / (1+0.01*calculateDistance(document.getElementById("cocogoat"), mouseX, mouseY))), 0.1), 1);
 	}
 	//set stereo pan based on whether cocogoat is left or right of the cursor position, scaled by width of window
 	//use square root to make pan effect more significant near the target. Requires workaround to return proper negative values.
